@@ -8,6 +8,7 @@ import { MessagesModule } from './messages/messages.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { AiModule } from './ai/ai.module';
 import { WhatsappModule } from './whatsapp/whatsapp.module';
+import { CrmModule } from './crm/crm.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -23,6 +24,7 @@ import { AppController } from './app.controller';
     MessagesModule,
     WebhookModule,
     WhatsappModule,
+    CrmModule,
   ],
   controllers: [AppController],
 })

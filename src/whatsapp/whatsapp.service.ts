@@ -12,6 +12,7 @@ import * as wppconnect from '@wppconnect-team/wppconnect';
 import * as fs from 'fs';
 import * as path from 'path';
 import { WebhookService } from '../webhook/webhook.service';
+import { CrmService } from '../crm/crm.service';
 
 export interface WhatsAppMessage {
   chatId: string;
@@ -38,6 +39,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     private configService: ConfigService,
     @Inject(forwardRef(() => WebhookService))
     private webhookService: WebhookService,
+    @Inject(forwardRef(() => CrmService))
+    private crmService: CrmService,
   ) {}
 
   async onModuleInit() {
@@ -143,6 +146,17 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       // Extract phone number (remove @c.us suffix)
       const phoneNumber = message.from.replace('@c.us', '');
 
+      // Get sender name from message
+      const senderName = message.notifyName || message.pushname || phoneNumber;
+
+      // Store message in CRM
+      try {
+        await this.crmService.addMessage(phoneNumber, text, false, senderName);
+        this.logger.log(`💬 Message stored in CRM from ${senderName}`);
+      } catch (error) {
+        this.logger.error(`❌ Error storing message in CRM: ${error.message}`);
+      }
+
       // Process message through webhook service
       try {
         await this.webhookService.processMessage(phoneNumber, text);
@@ -208,6 +222,14 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     try {
       this.logger.log('🔴 Disconnecting session...');
 
+      // Clear all CRM data first
+      try {
+        await this.crmService.clearAllData();
+        this.logger.log('✅ CRM data cleared');
+      } catch (e) {
+        this.logger.warn('Could not clear CRM data:', e.message);
+      }
+
       // Logout and close
       try {
         await this.client.logout();
@@ -249,7 +271,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         this.initSession();
       }, 3000);
 
-      return { success: true, message: 'Session disconnected' };
+      return { success: true, message: 'Session disconnected and CRM data cleared' };
     } catch (error) {
       this.logger.error('Error disconnecting:', error);
       return { success: false, message: error.message };
@@ -267,4 +289,169 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     await this.client.sendText(to, message);
     return { success: true };
   }
+
+  /**
+   * Get all existing WhatsApp chats and sync to CRM
+   */
+  async syncChatsWithCRM() {
+    if (!this.client) {
+      throw new Error('WhatsApp client not connected');
+    }
+
+    try {
+      this.logger.log('🔄 Fetching WhatsApp chats...');
+      
+      // Get all chats from WhatsApp using listChats
+      const chats = await this.client.listChats();
+      
+      this.logger.log(`📱 Found ${chats.length} chats`);
+
+      let synced = 0;
+      for (const chat of chats) {
+        // Skip groups and broadcast lists
+        if (chat.isGroup || chat.id.server !== 'c.us') continue;
+
+        const phoneNumber = chat.id.user;
+        const name = chat.name || chat.contact?.pushname || chat.contact?.name || phoneNumber;
+        
+        try {
+          // Create or update chat in CRM
+          await this.crmService.createOrUpdateChat(phoneNumber, name);
+          
+          // If chat has last message, update it
+          if (chat.lastMessage) {
+            const lastMsgContent = chat.lastMessage.body || chat.lastMessage.caption || '';
+            if (lastMsgContent) {
+              // We'll just store one recent message to show in list
+              await this.crmService.addMessage(
+                phoneNumber,
+                lastMsgContent,
+                chat.lastMessage.fromMe || false,
+                name,
+              );
+            }
+          }
+          synced++;
+        } catch (error) {
+          this.logger.warn(`Could not sync chat ${phoneNumber}: ${error.message}`);
+        }
+      }
+
+      this.logger.log(`✅ Synced ${synced} chats to CRM`);
+      return { success: true, synced, total: chats.length };
+    } catch (error) {
+      this.logger.error('Error syncing chats:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get chat messages from WhatsApp and sync to CRM
+   */
+  async syncChatMessages(phoneNumber: string, limit = 50) {
+    if (!this.client) {
+      throw new Error('WhatsApp client not connected');
+    }
+
+    try {
+      const chatId = `${phoneNumber}@c.us`;
+      
+      this.logger.log(`🔄 Fetching messages for ${phoneNumber}...`);
+      
+      // Try different methods to get messages
+      let messages = [];
+      
+      try {
+        // First try getAllMessagesInChat
+        messages = await this.client.getAllMessagesInChat(chatId, true, true);
+      } catch (e) {
+        this.logger.warn(`getAllMessagesInChat failed, trying alternative: ${e.message}`);
+        try {
+          // Try loadEarlierMessages
+          messages = await this.client.loadEarlierMessages(chatId);
+        } catch (e2) {
+          this.logger.warn(`loadEarlierMessages also failed: ${e2.message}`);
+          // Return empty if we can't get messages
+          return { success: true, synced: 0, message: 'Could not load messages from WhatsApp' };
+        }
+      }
+      
+      if (!messages || !Array.isArray(messages)) {
+        this.logger.warn('No messages array returned');
+        return { success: true, synced: 0 };
+      }
+      
+      // Take only the last N messages
+      const recentMessages = messages.slice(-limit);
+      
+      this.logger.log(`📨 Found ${recentMessages.length} messages`);
+
+      // Get sender name from contact
+      let senderName = phoneNumber;
+      try {
+        const contact = await this.client.getContact(chatId);
+        senderName = contact?.pushname || contact?.name || phoneNumber;
+      } catch (e) {
+        // Ignore contact fetch errors
+      }
+
+      let syncedCount = 0;
+      // Sync messages to CRM
+      for (const msg of recentMessages) {
+        const content = msg.body || msg.caption || '';
+        if (!content) continue;
+
+        try {
+          await this.crmService.addMessage(
+            phoneNumber,
+            content,
+            msg.fromMe || false,
+            senderName,
+          );
+          syncedCount++;
+        } catch (e) {
+          // Skip duplicate messages (unique constraint)
+        }
+      }
+
+      return { success: true, synced: syncedCount };
+    } catch (error) {
+      this.logger.error(`Error syncing messages for ${phoneNumber}:`, error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get all contacts from WhatsApp
+   */
+  async getAllContacts() {
+    if (!this.client) {
+      throw new Error('WhatsApp client not connected');
+    }
+
+    try {
+      const contacts = await this.client.getAllContacts();
+      
+      // Filter to only include real contacts (with names or saved)
+      const validContacts = contacts
+        .filter((c: any) => 
+          !c.isGroup && 
+          !c.isMe && 
+          c.id?.server === 'c.us' &&
+          (c.name || c.pushname || c.isMyContact)
+        )
+        .map((c: any) => ({
+          phoneNumber: c.id?.user || '',
+          name: c.name || c.pushname || c.id?.user || '',
+          isMyContact: c.isMyContact || false,
+        }));
+
+      return { success: true, contacts: validContacts };
+    } catch (error) {
+      this.logger.error('Error getting contacts:', error);
+      throw error;
+    }
+  }
 }
+
+

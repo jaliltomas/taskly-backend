@@ -94,3 +94,36 @@ model RawMessage {
   @@index([providerId])
   @@map("raw_messages")
 }
+
+// CRM Models
+model Chat {
+  id            Int           @id @default(autoincrement())
+  phoneNumber   String        @unique @map("phone_number") @db.VarChar(50)
+  name          String?       @db.VarChar(255)
+  lastMessage   String?       @map("last_message") @db.Text
+  lastMessageAt DateTime?     @map("last_message_at")
+  unreadCount   Int           @default(0) @map("unread_count")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  messages      ChatMessage[]
+
+  @@index([lastMessageAt(sort: Desc)])
+  @@map("chats")
+}
+
+model ChatMessage {
+  id        Int      @id @default(autoincrement())
+  chatId    Int      @map("chat_id")
+  content   String   @db.Text
+  fromMe    Boolean  @default(false) @map("from_me")
+  timestamp DateTime @default(now())
+  status    String   @default("sent") @db.VarChar(20)
+
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId])
+  @@index([timestamp(sort: Desc)])
+  @@map("chat_messages")
+}
+
