@@ -39,6 +39,7 @@ export class MessagesService {
 
   async getRecent(limit: number) {
     const items = await this.prisma.rawMessage.findMany({
+      where: { isArchived: false },
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: { provider: true },
@@ -50,6 +51,13 @@ export class MessagesService {
       page: 1,
       page_size: limit,
     };
+  }
+
+  async archiveAllRecent() {
+    await this.prisma.rawMessage.updateMany({
+      where: { isArchived: false },
+      data: { isArchived: true },
+    });
   }
 
   async findOne(id: number) {

@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Delete,
   Param,
   Query,
@@ -32,6 +33,13 @@ export class MessagesController {
   @Get('recent')
   getRecent(@Query('limit') limit?: number) {
     return this.messagesService.getRecent(limit || 20);
+  }
+
+  @Post('recent/clear')
+  @HttpCode(HttpStatus.OK)
+  async clearRecent() {
+    await this.messagesService.archiveAllRecent();
+    return { success: true };
   }
 
   @Get('stats/summary')

@@ -86,12 +86,14 @@ model RawMessage {
   status        String   @default("pending") @db.VarChar(20)
   productsCount Int      @default(0) @map("products_count")
   errorMessage  String?  @map("error_message") @db.Text
+  isArchived    Boolean  @default(false) @map("is_archived")
   createdAt     DateTime @default(now()) @map("created_at")
 
   provider Provider? @relation(fields: [providerId], references: [id])
 
   @@index([status])
   @@index([providerId])
+  @@index([isArchived])
   @@map("raw_messages")
 }
 
