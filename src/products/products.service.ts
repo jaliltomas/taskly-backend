@@ -286,13 +286,88 @@ export class ProductsService {
       return text.trim();
     };
 
+    const listCF = buildList('CF');
+    const listRV = buildList('RV');
+    const totalCats = Object.keys(groupedData).length;
+
+    // Save to database
+    const savedList = await this.prisma.priceList.create({
+      data: {
+        listCF,
+        listRV,
+        totalProducts: products.length,
+        totalCategories: totalCats,
+      },
+    });
+
     return {
-      listCF: buildList('CF'),
-      listRV: buildList('RV'),
+      id: savedList.id,
+      listCF,
+      listRV,
       totalProducts: products.length,
-      totalCategories: Object.keys(groupedData).length,
-      generatedAt: new Date().toISOString(),
+      totalCategories: totalCats,
+      generatedAt: savedList.createdAt.toISOString(),
     };
+  }
+
+  /**
+   * Get all saved price lists (history)
+   */
+  async getAllLists(page: number = 1, pageSize: number = 10) {
+    const skip = (page - 1) * pageSize;
+
+    const [items, total] = await Promise.all([
+      this.prisma.priceList.findMany({
+        skip,
+        take: pageSize,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          totalProducts: true,
+          totalCategories: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.priceList.count(),
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  /**
+   * Get a specific price list by ID
+   */
+  async getListById(id: number) {
+    const list = await this.prisma.priceList.findUnique({
+      where: { id },
+    });
+
+    if (!list) {
+      throw new NotFoundException('Price list not found');
+    }
+
+    return {
+      id: list.id,
+      listCF: list.listCF,
+      listRV: list.listRV,
+      totalProducts: list.totalProducts,
+      totalCategories: list.totalCategories,
+      generatedAt: list.createdAt.toISOString(),
+    };
+  }
+
+  /**
+   * Delete a price list
+   */
+  async deleteList(id: number) {
+    await this.prisma.priceList.delete({
+      where: { id },
+    });
   }
 }
 

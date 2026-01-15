@@ -129,3 +129,16 @@ model ChatMessage {
   @@map("chat_messages")
 }
 
+// Price Lists - Generated price lists history
+model PriceList {
+  id              Int      @id @default(autoincrement())
+  listCF          String   @map("list_cf") @db.Text
+  listRV          String   @map("list_rv") @db.Text
+  totalProducts   Int      @map("total_products")
+  totalCategories Int      @map("total_categories")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt(sort: Desc)])
+  @@map("price_lists")
+}
+

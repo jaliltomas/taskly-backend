@@ -39,6 +39,25 @@ export class ProductsController {
     return this.productsService.generateLists();
   }
 
+  @Get('lists')
+  getAllLists(
+    @Query('page') page?: number,
+    @Query('page_size') pageSize?: number,
+  ) {
+    return this.productsService.getAllLists(page || 1, pageSize || 10);
+  }
+
+  @Get('lists/:id')
+  getListById(@Param('id', ParseIntPipe) id: number) {
+    return this.productsService.getListById(id);
+  }
+
+  @Delete('lists/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteList(@Param('id', ParseIntPipe) id: number) {
+    return this.productsService.deleteList(id);
+  }
+
   @Get('history/all')
   getAllHistory(
     @Query('page') page?: number,
