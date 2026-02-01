@@ -318,19 +318,45 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
           // Create or update chat in CRM
           await this.crmService.createOrUpdateChat(phoneNumber, name);
           
-          // If chat has last message, update it
-          if (chat.lastMessage) {
-            const lastMsgContent = chat.lastMessage.body || chat.lastMessage.caption || '';
-            if (lastMsgContent) {
-              // We'll just store one recent message to show in list
-              await this.crmService.addMessage(
-                phoneNumber,
-                lastMsgContent,
-                chat.lastMessage.fromMe || false,
-                name,
-              );
+          // Try to load recent messages for this chat
+          const chatId = `${phoneNumber}@c.us`;
+          let chatMessages = [];
+          
+          // Try to get some recent messages
+          try {
+            chatMessages = await this.client.getMessages(chatId, { count: 10 });
+          } catch (e) {
+            // Fallback to lastMessage only
+            if (chat.lastMessage) {
+              const lastMsgContent = chat.lastMessage.body || chat.lastMessage.caption || '';
+              if (lastMsgContent) {
+                chatMessages = [{
+                  body: lastMsgContent,
+                  fromMe: chat.lastMessage.fromMe || false,
+                }];
+              }
             }
           }
+          
+          // Sync messages if we got any
+          if (chatMessages && Array.isArray(chatMessages) && chatMessages.length > 0) {
+            for (const msg of chatMessages) {
+              const content = msg.body || msg.caption || '';
+              if (!content) continue;
+              
+              try {
+                await this.crmService.addMessage(
+                  phoneNumber,
+                  content,
+                  msg.fromMe || false,
+                  name,
+                );
+              } catch (e) {
+                // Skip duplicates
+              }
+            }
+          }
+          
           synced++;
         } catch (error) {
           this.logger.warn(`Could not sync chat ${phoneNumber}: ${error.message}`);
@@ -358,33 +384,65 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       
       this.logger.log(`🔄 Fetching messages for ${phoneNumber}...`);
       
-      // Try different methods to get messages
+      // Try multiple methods to get messages
       let messages = [];
+      let method = 'none';
       
+      // Method 1: Try getMessages with higher limit
       try {
-        // First try getAllMessagesInChat
-        messages = await this.client.getAllMessagesInChat(chatId, true, true);
+        messages = await this.client.getMessages(chatId, { count: limit });
+        if (messages && Array.isArray(messages) && messages.length > 0) {
+          method = 'getMessages';
+        }
       } catch (e) {
-        this.logger.warn(`getAllMessagesInChat failed, trying alternative: ${e.message}`);
+        this.logger.warn(`getMessages failed: ${e.message}`);
+      }
+      
+      // Method 2: Try getAllMessagesInChat
+      if (!messages || messages.length === 0) {
         try {
-          // Try loadEarlierMessages
-          messages = await this.client.loadEarlierMessages(chatId);
-        } catch (e2) {
-          this.logger.warn(`loadEarlierMessages also failed: ${e2.message}`);
-          // Return empty if we can't get messages
-          return { success: true, synced: 0, message: 'Could not load messages from WhatsApp' };
+          messages = await this.client.getAllMessagesInChat(chatId, true, true);
+          if (messages && Array.isArray(messages) && messages.length > 0) {
+            method = 'getAllMessagesInChat';
+          }
+        } catch (e) {
+          this.logger.warn(`getAllMessagesInChat failed: ${e.message}`);
         }
       }
       
-      if (!messages || !Array.isArray(messages)) {
-        this.logger.warn('No messages array returned');
-        return { success: true, synced: 0 };
+      // Method 3: Try loadAndGetAllMessagesInChat
+      if (!messages || messages.length === 0) {
+        try {
+          messages = await this.client.loadAndGetAllMessagesInChat(chatId, true, true);
+          if (messages && Array.isArray(messages) && messages.length > 0) {
+            method = 'loadAndGetAllMessagesInChat';
+          }
+        } catch (e) {
+          this.logger.warn(`loadAndGetAllMessagesInChat failed: ${e.message}`);
+        }
       }
+      
+      // Method 4: Try loadEarlierMessages
+      if (!messages || messages.length === 0) {
+        try {
+          messages = await this.client.loadEarlierMessages(chatId);
+          if (messages && Array.isArray(messages) && messages.length > 0) {
+            method = 'loadEarlierMessages';
+          }
+        } catch (e) {
+          this.logger.warn(`loadEarlierMessages failed: ${e.message}`);
+        }
+      }
+      
+      if (!messages || !Array.isArray(messages) || messages.length === 0) {
+        this.logger.warn(`No messages could be loaded for ${phoneNumber}`);
+        return { success: true, synced: 0, message: 'Could not load messages from WhatsApp' };
+      }
+      
+      this.logger.log(`📨 Found ${messages.length} messages using ${method}`);
       
       // Take only the last N messages
       const recentMessages = messages.slice(-limit);
-      
-      this.logger.log(`📨 Found ${recentMessages.length} messages`);
 
       // Get sender name from contact
       let senderName = phoneNumber;
