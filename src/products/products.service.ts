@@ -322,7 +322,7 @@ export class ProductsService {
       };
     }
 
-    const products = await this.prisma.productUnique.findMany(productQuery);
+    const products: any[] = await this.prisma.productUnique.findMany(productQuery);
 
     // Get categories for ordering
     const categories = await this.prisma.category.findMany({
