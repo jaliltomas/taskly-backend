@@ -20,12 +20,14 @@ export class ProductsController {
     @Query('page_size') pageSize?: number,
     @Query('category_id') categoryId?: number,
     @Query('search') search?: string,
+    @Query('date') date?: string,
   ) {
     return this.productsService.findAll({
       page: page || 1,
       pageSize: pageSize || 50,
       categoryId,
       search,
+      date,
     });
   }
 
@@ -35,8 +37,8 @@ export class ProductsController {
   }
 
   @Get('lists/generate')
-  generateLists() {
-    return this.productsService.generateLists();
+  generateLists(@Query('date') date?: string) {
+    return this.productsService.generateLists(date);
   }
 
   @Get('lists')
@@ -63,11 +65,15 @@ export class ProductsController {
     @Query('page') page?: number,
     @Query('page_size') pageSize?: number,
     @Query('search') search?: string,
+    @Query('date') date?: string,
+    @Query('only_best') onlyBest?: string,
   ) {
     return this.productsService.getAllHistory({
       page: page || 1,
       pageSize: pageSize || 50,
       search,
+      date,
+      onlyBest: onlyBest === 'true',
     });
   }
 
